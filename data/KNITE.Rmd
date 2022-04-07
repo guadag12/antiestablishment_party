@@ -1,0 +1,479 @@
+---
+title: 'Citaciones a mujeres en Cs Sociales Conicet'
+description: |
+  Estimación de citación a mujeres para 253 investigadores CONICET en disciplinas K5 y KS1.
+author:
+date: "6/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(data.table)
+library(stargazer)
+library(foreign)
+library(igraph)
+library(tidyverse)
+library(plyr)
+library(sqldf)
+library(readxl)
+library(knitr)
+library(DT)
+library(highcharter)
+library(see)
+library(ggsci)
+library(hrbrthemes)
+library(viridis)
+library(gridExtra)
+library(haven)
+library(sknifedatar)
+library(tidyverse)
+library(readr)
+```
+
+
+```{r}
+rm(list = ls())
+autores_citas <- read_excel("D:/Guada/Research/Computational Social Science/scientific-networks-g/01_data/01_raw/autores_citas (1).xlsx")
+
+autores_citas <- autores_citas %>%
+  select(author=author, citas_totales, author_genero=genero) %>%
+  filter(!is.na(author_genero))
+data1 <- read.dta("C:/Users/guada/OneDrive/Escritorio/apellidos_corregidos_stata_viejo.dta") 
+data1 <- data1 %>% dplyr::rename(investigador_genero=Genero)
+data_investigadores <- read_dta("https://github.com/guadag12/antiestablishment_party/raw/main/data/Comunidades_keywords.dta")
+data_doctorados_investigadores <- read_csv("https://raw.githubusercontent.com/guadag12/antiestablishment_party/main/data/data_doctorados_investigadores_07042022%20-%20union-lugar_doctorado.csv")
+data1 <- data1 %>%
+  left_join(data_doctorados_investigadores[, c("idInvestigador", "Lugar")])
+#data_investigadores <- read_csv("D:/Guada/Research/Computational Social Science/scientific-networks-g/01_data/01_raw/data_investigadores.csv") 
+```
+
+```{r}
+data1 <- data1[order(data1$Investigador),] 
+data11<- data1[data1$test>1,]
+data_investigadores <- data_investigadores %>% select(idInvestigador, Comunidad)
+data11 <- data11 %>% left_join(data_investigadores, by = "idInvestigador")
+data11 <- data11 %>% select(-investigador)
+data11$author <- tolower(data11$author)
+data11 <- data11 %>%
+  mutate(id_art = paste0(idInvestigadorST, "_", articulo))
+
+autores_citas$author <- tolower(autores_citas$author)
+autores_citas$author_genero <- toupper(autores_citas$author_genero)
+
+#autores_citas <- autores_citas %>% rename(author = author, author_genero =genero_g)
+data10 <- data11 %>%
+ left_join(autores_citas, by = c("author" = "author"))
+
+data11 <- data11 %>%
+ left_join(autores_citas, by = c("author" = "author"))
+
+data11 <- data11 %>%
+  filter(!is.na(author_genero) & !is.na(investigador_genero)) %>%
+   mutate(Comunidad = case_when(
+     Comunidad == 1 ~ 1, Comunidad == 2 ~ 2,
+     Comunidad == 4 ~ 3, Comunidad == 6 ~ 4,
+     Comunidad == 7 ~ 5, Comunidad == 9 ~ 6,
+     T ~ 7))
+
+#data11 <- data11 %>% left_join(data_investigadores, by = "idInvestigador")
+
+data12 <- data11 %>%
+   filter(!is.na(author_genero) & !is.na(investigador_genero)) %>%
+   select(id_art, investigador_genero, author_genero) %>%
+ mutate(author_genero = case_when(
+   author_genero == "F" ~ 1,
+   T ~ 0
+   ))
+
+data_cita <-  data.table(data12)[, cita_muj := if(sum(author_genero) >= 1) 1 else 0, by = id_art]
+
+
+
+```
+
+```{r}
+data111 <- sqldf("select id_art, author_genero, investigador_genero, count(*) cantidad from data11 group by id_art, author_genero, investigador_genero")
+
+data111 <- data111 %>%
+  mutate(investigador_genero = case_when(
+    investigador_genero == 0 ~ "M",
+    T ~ "F"
+  )) %>%
+  tidyr::spread(key = author_genero, value = cantidad ) %>%
+  select(-"ND", Fem ="F", Mas = "M") %>%
+  mutate(Fem = as.character(Fem), 
+         Mas = as.character(Mas))
+
+data111[is.na(data111$Fem), "Fem"] <-0 
+data111[is.na(data111$Mas), "Mas"] <-0 
+data111 <- data111 %>%
+  gather(key = "author_genero", "cantidad", c(Fem:Mas)) %>%
+  arrange(id_art)
+```
+
+## Datos 💾
+
+Fueron analizados `r nrow(autores_citas)` autores, de las cuales `r nrow(autores_citas[autores_citas$author_genero == "F",])` (`r paste0(round((nrow(autores_citas[autores_citas$author_genero == "F",])/nrow(autores_citas))*100,2), " %")`) son mujeres. Y 253 investigadores, dentro de los cuales hay `r nrow(data1 %>% filter(investigador_genero == 1) %>% group_by(idInvestigador) %>% dplyr::summarise(n = n()))` mujeres.
+
+De los 759 papers evaluados, al menos `r nrow(data111[data111$author_genero == "Fem" & data111$cantidad >= 1,])` tienen una autora mujer entre sus citas. Si bien es un número interesante, recordemos que sólo tenemos el género de `r nrow(autores_citas)`, `r paste0("(",  round((nrow(autores_citas)/3380)*100,2), "%)")`  autores, de un total de 3380 autores.
+
+# Boxplot 📏
+
+ Como se puede observar en el boxplot, los investigadores varones tienden a citar en un gran porcentaje a colegas de su mismo género. Por ejemplo, los hombres tienden a citar entre `r mean(data111[data111$investigador_genero == "M" & data111$author_genero == "Fem", "cantidad"], na.rm=T)` mujeres en promedio por paper (`r median(data111[data111$investigador_genero == "M" & data111$author_genero == "Fem", "cantidad"], na.rm=T)` es la mediana. En cambio, las mujeres citan `r mean(data111[data111$investigador_genero == "F" & data111$author_genero == "Fem", "cantidad"], na.rm=T)` en promedio. **Siendo que en por cada paper se detectan `r round(mean(data111[!is.na(data111$cantidad) & data111$cantidad!=0, "cantidad"], na.rm=T),0)` autores.**
+ 
+ 
+ 
+```{r}
+data_perc <-  data111 %>%#
+  group_by(id_art,investigador_genero) %>% 
+  dplyr::summarise(author_genero = author_genero,
+                   cantidad = as.numeric(cantidad), 
+                   percent = cantidad/sum(cantidad)) %>%
+  filter(!is.na(percent))
+```
+
+
+```{r}
+wrap_names <- c(`M` = "Inv. Hombres", `F` = "Inv. Mujeres")
+
+p1 <- data_perc %>%
+  filter(author_genero == "Mas") %>%
+  mutate(investigador_genero = case_when(investigador_genero == "F" ~ "Inv. Mujer", T ~ "Inv. Hombre")) %>%
+  ggplot( aes(x=investigador_genero, y=percent, color = investigador_genero)) +
+    geom_boxplot() +
+  ggtitle("Autores hombres citados por Investigadores/as") +
+  ylab("% de hombres citados") +
+  xlab("Género Investigador/a")+
+  theme(legend.position = "none") +
+      scale_color_manual(values=c( "#6DCD59","#3E4A89")) 
+
+
+p2 <- data_perc %>%
+  filter(author_genero == "Fem") %>%
+  mutate(investigador_genero = case_when(investigador_genero == "F" ~ "Inv. Mujer", T ~ "Inv. Hombre")) %>%
+  ggplot( aes(x=investigador_genero, y=percent, color = investigador_genero)) +
+  geom_boxplot() +
+  ggtitle("Autoras Mujeres citados por Investigadores/as") +
+  ylab("% de mujeres citadas") +
+  xlab("Género Investigador/a") +
+  theme(legend.position = "none") +
+      scale_color_manual(values=c("#6DCD59","#3E4A89")) 
+
+
+grid.arrange(p1, p2)
+```
+
+```{r}
+ddd <- data111 %>%
+  mutate(cantidad = as.numeric(cantidad)) %>%
+  group_by(investigador_genero, author_genero) %>%
+  dplyr::summarise(suma = sum(cantidad)) %>%
+  ungroup() %>%
+  group_by(investigador_genero) %>%
+  dplyr::mutate(perc = paste0(round((suma/sum(suma))*100,2), "%")) %>%
+  dplyr::rename(`Genero autor/a` = author_genero) %>%
+  mutate(investigador_genero = case_when(
+    investigador_genero == "M" ~ "Masculino",
+    T ~ "Femenino"),
+    `Genero autor/a` = case_when(
+    `Genero autor/a` == "Mas" ~ "Masculino",
+    T ~ "Femenino")
+    )
+
+ggplot(ddd) +
+  aes(x = investigador_genero, y = suma, fill = `Genero autor/a` ) +
+  geom_bar(stat = "identity", position = "fill") +
+  theme_minimal() +
+  xlab("Género de Investigadores/as") +
+  ylab("Cantidad") +
+  scale_fill_manual(values=c( "#3E4A89","#6DCD59")) +
+  geom_text(aes(label=perc, group=`Genero autor/a`),size=3, 
+            position = position_fill(vjust=0.5), ddd) +
+  ggtitle("Género de autores citados en relación al género de investigadores")
+```
+
+# Insights 💡
+
+### Distribución en la citación 🔎
+
+```{r}
+require('plyr')
+comu_names <-  c(`1` = "1) Socio. Política", `2` = "2) Socio. Rural y Demografia", `3` = "3) Instituciones Políticas",
+                              `4` = "4) Teoria Social", `5` = "5) Movimientos Sociales", `6` = "6) Estudios Culturales",
+                              `7` = "7) Comunicación y Salud")
+
+data_perc1 <- data_perc %>%
+  left_join(data11 %>%
+            mutate(id_art = paste0(idInvestigadorST, "_", articulo)) %>%
+            select(id_art, Comunidad), by = "id_art") %>%
+  mutate(Comunidad = case_when(
+     Comunidad == 1 ~ 1, Comunidad == 2 ~ 2,
+     Comunidad == 4 ~ 3, Comunidad == 6 ~ 4,
+     Comunidad == 7 ~ 5, Comunidad == 9 ~ 6,
+     T ~ 7)) 
+
+data_perc2 <- data_perc %>%
+  left_join(data11 %>%
+            mutate(id_art = paste0(idInvestigadorST, "_", articulo)) %>%
+            select(id_art, disciplina), by = "id_art") %>%
+  mutate(disciplina = case_when(disciplina == "Derecho,Cs.Políticas y Relaciones Internacionales" ~ "Derecho, CP y RRII",
+                                T ~ "Sociología, CS y Demografía"))
+data_perc3 <- data_perc %>%
+  left_join(data11 %>%
+            mutate(id_art = paste0(idInvestigadorST, "_", articulo)) %>%
+            select(id_art, categoria), by = "id_art")
+
+data_perc4 <- data_perc %>%
+  left_join(data11 %>%
+            mutate(id_art = paste0(idInvestigadorST, "_", articulo)) %>%
+            select(id_art, gruposetarios), by = "id_art")
+
+data_perc5 <- data_perc %>%
+  left_join(data11 %>%
+            mutate(id_art = paste0(idInvestigadorST, "_", articulo),
+                   Lugar = toupper(Lugar)) %>%
+            select(id_art, Lugar) 
+              , by = "id_art") %>%
+  filter(!is.na(Lugar))
+
+```
+
+
+```{r}
+#xaringanExtra::use_panelset()
+```
+
+```{r}
+# data_plot <- tibble::tibble(ID = c("Distribución de Probabilidad 📊",
+#                                    "Género 🚻",
+#                                    "Comunidad 🕸",
+#                                    "Disciplina 🎓",
+#                                    "Categoría CONICET 🧪",
+#                                    "Edad 📅",
+#                                    "Lugar PhD 🌐️"),
+#                             plots = list(
+```
+
+
+```{r}
+##################################### GENERAL
+data_perc %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.8) +
+  scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución de probabilidad en citación", x = "Porcentaje de citación") +
+  geom_vline(aes(xintercept = median(percent), color="red"), linetype="dashed", show_guide=TRUE) + 
+  geom_vline(aes(xintercept = quantile(percent,0.1), color="blue"), linetype="dashed", show_guide=TRUE) +
+  geom_vline(aes(xintercept = quantile(percent,0.9), color="red"),linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+```
+
+
+```{r}
+##################################### GENERO
+data_perc %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.8) +
+  facet_wrap(~investigador_genero, labeller = as_labeller(wrap_names)) +
+      scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución en el porcentaje en citación", x = "Porcentaje de citación",
+       subtitle = "Según género del investigador/a") +
+  geom_vline(data = ddply(data_perc, "investigador_genero", summarize, wavg = median(percent)), aes(xintercept=wavg), color="blue",  linetype="dashed", show_guide=TRUE) +
+  geom_vline(data = ddply(data_perc, "investigador_genero", summarize, wavg = quantile(percent,0.1)), aes(xintercept=wavg), color="red", linetype="dashed", show_guide=TRUE) +
+  geom_vline(data = ddply(data_perc, "investigador_genero", summarize, wavg = quantile(percent,0.9)), aes(xintercept=wavg), color="red", linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+```
+
+
+```{r}
+##################################### COMUNIDAD
+data_perc1 %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~Comunidad, labeller = as_labeller(comu_names)
+             ) +
+  scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución de probabilidad en citación", x = "Porcentaje de citación",
+       subtitle = "Según comunidad de pertenencia del investigador/a") +
+  geom_vline(aes(xintercept = median(percent), color="red"), linetype="dashed", show_guide=TRUE) + 
+  geom_vline(aes(xintercept = quantile(percent,0.1), color="blue"), linetype="dashed", show_guide=TRUE) +
+  geom_vline(aes(xintercept = quantile(percent,0.9), color="red"),linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+```
+
+
+```{r}
+##################################### DISCIPLINA
+
+data_perc2 %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~disciplina) +
+  scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución de probabilidad en citación", x = "Porcentaje de citación",
+       subtitle = "Según disciplina CONICET del investigador/a") +
+  geom_vline(aes(xintercept = median(percent), color="red"), linetype="dashed", show_guide=TRUE) + 
+  geom_vline(aes(xintercept = quantile(percent,0.1), color="blue"), linetype="dashed", show_guide=TRUE) +
+  geom_vline(aes(xintercept = quantile(percent,0.9), color="red"),linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+```
+
+
+```{r}
+##################################### CATEGORIA CONICET
+data_perc3 %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~categoria) +
+  scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución de probabilidad en citación", x = "Porcentaje de citación",
+       subtitle = "Según categoría CONICET del investigador/a") +
+  geom_vline(aes(xintercept = median(percent), color="red"), linetype="dashed", show_guide=TRUE) + 
+  geom_vline(aes(xintercept = quantile(percent,0.1), color="blue"), linetype="dashed", show_guide=TRUE) +
+  geom_vline(aes(xintercept = quantile(percent,0.9), color="red"),linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+```
+
+
+```{r}
+##################################### EDAD AGRUPADA
+
+data_perc4 %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~gruposetarios) +
+  scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución de probabilidad en citación", x = "Porcentaje de citación",
+       subtitle = "Según edad del investigador/a") +
+  geom_vline(aes(xintercept = median(percent), color="red"), linetype="dashed", show_guide=TRUE) + 
+  geom_vline(aes(xintercept = quantile(percent,0.1), color="blue"), linetype="dashed", show_guide=TRUE) +
+  geom_vline(aes(xintercept = quantile(percent,0.9), color="red"),linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+```
+
+
+```{r}
+##################################### LUGAR DOCTORADO
+data_perc5 %>%
+  ggplot(aes(x=percent, group=author_genero, fill=author_genero)) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~Lugar, ncol = 2) +
+  scale_fill_manual(values=c("#3E4A89", "#6DCD59")) +
+  labs(title = "Distribución de probabilidad en citación", x = "Porcentaje de citación", subtitle = "Según lugar donde el investigador/a hizo el doctorado") +
+  geom_vline(aes(xintercept = median(percent), color="red"), linetype="dashed", show_guide=TRUE) + 
+  geom_vline(aes(xintercept = quantile(percent,0.1), color="blue"), linetype="dashed", show_guide=TRUE) +
+  geom_vline(aes(xintercept = quantile(percent,0.9), color="red"),linetype="dashed", show_guide=TRUE) +
+  theme_minimal() +
+   scale_color_manual(name = "statistics", values = c("Mediana" = "blue", "Percentile 0.1" = "red", "Percentile 0.9" = "red"))
+#
+#))
+```
+
+
+
+# Regresión Logística I
+
+
+**Y**: probabilidad de citar autoras mujeres
+**X1**: Género del investigador/a
+**X2**: Lugar donde el investigador/a hizo el PhD
+**X3**: Edad del investigador/a
+**X4**: Disciplina CONICET del investigador/a
+**X5**: Categoría CONICET del investigador/a
+**X6**: Comunidad de pertenencia del investigador/a
+
+
+```{r}
+data11 <- data11 %>%
+  mutate(investigador_genero = case_when(
+    investigador_genero == 1 ~ "F",
+    T ~  "M"
+  ))
+
+data_reg <- data_perc %>%
+  left_join(data11 %>%
+               filter( author_genero != "ND") %>%
+  select(id_art,
+         Lugar, edad, disciplina, categoria, Comunidad) %>%
+    mutate(Lugar = toupper(Lugar)))
+
+data_reg <- data_reg[, -which(names(data_reg) %in% c("id_art", "percent"))]
+
+modelo_logistico1 <- glm(formula = as.factor(author_genero) ~ ., data = data_reg, family = "binomial")
+summary(modelo_logistico1)
+```
+# Regresión Logística II
+
+**Y**: probabilidad de citar autoras mujeres
+**X1**: género del investigador
+
+
+```{r}
+data_reg <- data11 %>%
+  filter(!is.na(author_genero) & author_genero != "ND") %>%
+  select(id_art, investigador_genero, author_genero) %>%
+  group_by(id_art, investigador_genero, author_genero) %>%
+  dplyr::summarise(count = n()) %>%
+  ungroup() %>%
+  group_by(id_art) %>% 
+  transmute(percent = count/sum(count))
+
+
+data_reg <- data_reg %>%
+  left_join(data11 %>%
+               filter( author_genero != "ND") %>%
+  select(id_art, investigador_genero,author_genero) 
+  ) %>%
+  mutate(author_genero = case_when(author_genero == "M" ~ 0, T~1))
+data_reg <- sqldf("select * from data_reg group by id_art, investigador_genero, author_genero")
+
+
+#data_reg <- data_reg[,-c(1,4)]
+data_reg <- data_reg[,-c(1,2#,4
+                         )]
+
+modelo_logistico2 <- glm(formula = as.factor(author_genero) ~ ., data = data_reg, family = "binomial")
+summary(modelo_logistico2)
+```
+
+
+```{r}
+data_reg <- data11 %>%
+  filter(!is.na(author_genero) & author_genero != "ND") %>%
+  select(id_art, investigador_genero, author_genero) %>%
+  group_by(id_art, investigador_genero, author_genero) %>%
+  dplyr::summarise(count = n()) %>%
+  ungroup() %>%
+  group_by(id_art) %>% 
+  transmute(percent = count/sum(count))
+
+
+data_reg <- data_reg %>%
+  left_join(data11 %>%
+               filter( author_genero != "ND") %>%
+  select(id_art, investigador_genero,author_genero) 
+  ) %>%
+  mutate(author_genero = case_when(author_genero == "M" ~ 0, T~1))
+
+ggplot(data = data_reg, aes(y = as.factor(investigador_genero), x =percent)) +
+  geom_point(aes(color = as.factor(investigador_genero)), shape = 1) + 
+    stat_smooth(method="glm", se=FALSE, method.args = list(family=binomial)) + 
+
+  theme_bw() +
+  labs(title = "Regresión logística",
+       y = "Género") +
+  theme(legend.position = "none")
+
+
+```
